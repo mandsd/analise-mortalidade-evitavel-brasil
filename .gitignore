@@ -1,0 +1,35 @@
+# Dados brutos e processados (grandes, gerados em runtime)
+data/raw/
+data/processed/
+
+# Cache de células de notebook
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Ambientes virtuais
+.venv/
+venv/
+env/
+
+# Variáveis de ambiente
+.env
+.env.*
+
+# Arquivos temporários do DATASUS
+*.dbc
+*.dbf
+
+# Arquivos siconfi por município (cache intermediário)
+data/raw/siconfi/_mun_*.json
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini
