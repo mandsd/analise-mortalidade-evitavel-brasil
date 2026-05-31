@@ -3,6 +3,11 @@ dbfread>=2.0
 pandas>=2.0
 pyarrow>=14.0
 numpy>=1.24
+requests
+scikit-learn>=1.3
+statsmodels>=0.14
+xgboost>=2.0
+scipy
 jupyter
 ipykernel
 matplotlib

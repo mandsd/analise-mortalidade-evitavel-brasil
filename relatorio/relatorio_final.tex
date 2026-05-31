@@ -1,0 +1,483 @@
+\documentclass[11pt,a4paper]{article}
+
+% ----- Pacotes -----
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazil]{babel}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage[table]{xcolor}        % cor + listras de linha em tabelas
+\usepackage{booktabs}
+\usepackage{tabularx}             % colunas elásticas (texto que quebra)
+\usepackage{ragged2e}            % alinhamento em colunas X
+\usepackage{amsmath}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage[font=small,labelfont=bf,skip=5pt]{caption}
+\usepackage[nobottomtitles*]{titlesec}   % evita títulos no rodapé da página
+
+% ----- Cores (definidas antes de quem as usa) -----
+\definecolor{azulsec}{RGB}{31,59,87}     % azul dos títulos
+\definecolor{cinzahdr}{RGB}{31,59,87}    % cabeçalho de tabela
+\definecolor{cinzalin}{RGB}{238,242,246} % listra clara das linhas
+
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=azulsec,urlcolor=azulsec,citecolor=azulsec}
+
+\setlength{\parskip}{0.5em}
+\setlength{\parindent}{0pt}
+\renewcommand{\arraystretch}{1.25}
+\setlength{\tabcolsep}{6pt}
+
+% Evita linhas órfãs/viúvas e títulos colados no fim da página
+\widowpenalty=10000
+\clubpenalty=10000
+\setlength{\headsep}{12pt}
+
+% Títulos de seção em azul, com espaçamento que segura o texto seguinte
+\titleformat{\section}{\Large\bfseries\color{azulsec}}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\large\bfseries\color{azulsec}}{\thesubsection}{0.6em}{}
+\titlespacing*{\section}{0pt}{2.2ex plus 1ex minus .2ex}{1.2ex plus .2ex}
+\titlespacing*{\subsection}{0pt}{1.8ex plus 1ex minus .2ex}{0.9ex plus .2ex}
+
+% Estilo padrão de cabeçalho de tabela (texto branco sobre azul)
+\newcommand{\hdr}[1]{\textcolor{white}{\textbf{#1}}}
+\newcolumntype{Y}{>{\RaggedRight\arraybackslash}X}  % coluna X justificada à esquerda
+
+% ----- Capa -----
+\title{\textbf{Mortalidade por Causas Evitáveis no Brasil}\\[0.3em]
+\large Desigualdade socioeconômica, padrões municipais e perfis de causa\\(2022--2024)}
+\author{Projeto Data Major --- Tópicos em Banco de Dados\\IESB}
+\date{Maio de 2026}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+\clearpage
+
+\begin{abstract}
+\noindent Este trabalho investiga a relação entre a mortalidade por causas evitáveis e as
+condições socioeconômicas dos municípios brasileiros. A partir de um pipeline de dados
+completo (ETL), integramos os microdados de óbitos do SIM/DATASUS (2022--2024) a indicadores
+de desenvolvimento humano, renda, desigualdade e investimento em saúde. Aplicamos a Lista
+Brasileira de Causas Evitáveis (LBCE) para identificar $\approx$1,37 milhão de óbitos
+evitáveis na faixa de 5 a 74 anos. Sobre esse conjunto realizamos três análises
+complementares: (i) regressão multivariada (OLS, Random Forest e XGBoost) para medir a
+associação entre variáveis socioeconômicas e a taxa de mortalidade evitável;
+(ii) clusterização (\emph{K-Means}) dos municípios em quatro perfis socioeconômicos; e
+(iii) mineração das causas básicas (CID-10) para caracterizar \emph{do que} morre cada perfil.
+Para garantir comparabilidade entre municípios com estruturas etárias distintas, calculamos a
+taxa de mortalidade \textbf{padronizada por idade} (padronização direta com a população do
+Censo 2022), adotada como desfecho principal. Os resultados confirmam associação
+estatisticamente significativa entre desigualdade (Gini) e mortalidade evitável, e revelam uma
+assinatura socioeconômica nas causas: municípios mais pobres concentram doenças infecciosas e
+negligenciadas, enquanto os mais desenvolvidos concentram doenças crônicas. A padronização por
+idade corrige um paradoxo das taxas brutas (Sul/Sudeste apareciam com mortalidade maior por
+terem população mais envelhecida) e alinha os sinais da regressão à hipótese socioeconômica.
+\end{abstract}
+
+\clearpage
+\tableofcontents
+\clearpage
+
+% ===================================================================
+\section{Introdução}
+
+\textbf{Problema.} Causas evitáveis de morte são aquelas que poderiam ser prevenidas ou
+tratadas por ações do Sistema Único de Saúde (SUS): imunização, diagnóstico precoce, atenção
+básica e políticas de saúde pública. A persistência de altas taxas dessas mortes no Brasil é
+considerada um indicador de iniquidade --- pessoas morrem de causas que o sistema de saúde,
+em tese, sabe prevenir.
+
+\textbf{Hipótese.} A taxa de mortalidade por causas evitáveis de um município está associada
+ao seu nível de desenvolvimento socioeconômico (renda, IDH-M, desigualdade, saneamento,
+escolaridade) e ao esforço público em saúde.
+
+\textbf{Objetivo.} Construir um pipeline de dados reprodutível e aplicar técnicas de
+modelagem e mineração para: (1) quantificar a associação entre condições socioeconômicas e a
+mortalidade evitável; (2) identificar perfis típicos de município; e (3) caracterizar o
+padrão de causas de cada perfil.
+
+% ===================================================================
+\section{Fontes de Dados}
+
+A Tabela~\ref{tab:fontes} resume as cinco fontes integradas, todas públicas.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Fontes de dados utilizadas.}
+\label{tab:fontes}
+\rowcolors{2}{cinzalin}{white}
+\begin{tabularx}{\textwidth}{l Y >{\RaggedRight\arraybackslash}p{4.0cm}}
+\rowcolor{cinzahdr}
+\hdr{Fonte} & \hdr{Conteúdo} & \hdr{Acesso} \\
+\midrule
+SIM / DATASUS & Microdados de óbitos (CID-10), por UF e ano & FTP (arquivos \texttt{.dbc}) \\
+IBGE / Sidra  & População municipal (Censo 2022; estimativas) & API (tab.\ 4714 e 6579) \\
+IBGE / Sidra  & População por faixa etária $\times$ município & API (tab.\ 9514) \\
+IBGE / Sidra  & PIB municipal & API (tab.\ 5938) \\
+SICONFI / Tesouro & Despesa municipal em saúde (função 10) & API DCA-Anexo I-E \\
+IPEA / Atlas DH & IDH-M, Gini, renda, pobreza, saneamento & API (séries \texttt{ADH\_*}) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\textbf{Tratamento de lacunas temporais.} O painel cobre os anos de 2022, 2023 e 2024, mas
+nem toda fonte tem cobertura completa nesses anos. Adotamos substituições explícitas,
+registradas em uma coluna \texttt{ANO\_FONTE} para auditoria:
+\begin{itemize}[nosep]
+  \item \textbf{População 2023}: o IBGE não publicou estimativa; usamos o Censo 2022 como proxy.
+  \item \textbf{PIB 2024}: indisponível por defasagem contábil ($\approx$2 anos); usamos o PIB de 2023.
+  \item \textbf{Atlas DH}: calculado apenas com base no Censo 2010; é tratado como
+        \emph{invariante no tempo} (repetido nos três anos).
+\end{itemize}
+
+% ===================================================================
+\section{Metodologia}
+
+\subsection{Classificação das causas evitáveis (LBCE)}
+
+Utilizamos a \textbf{Lista Brasileira de Causas de Mortes Evitáveis} de 5 a 74 anos
+(Malta et al., 2007; atualização 2010), que organiza códigos CID-10 segundo o tipo de
+intervenção do SUS capaz de evitar a morte. A lista oficial possui cinco grupos; neste
+trabalho utilizamos \textbf{quatro}, descritos na Tabela~\ref{tab:lbce}.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Grupos da LBCE utilizados na análise.}
+\label{tab:lbce}
+\rowcolors{2}{cinzalin}{white}
+\begin{tabularx}{\textwidth}{l Y}
+\rowcolor{cinzahdr}
+\hdr{Grupo} & \hdr{Descrição} \\
+\midrule
+\texttt{imunoprevencao}             & Reduzíveis por vacinação \\
+\texttt{doencas\_infecciosas}       & Tuberculose, HIV, hepatites, infecções respiratórias, doenças tropicais \\
+\texttt{doencas\_nao\_transmissiveis} & Neoplasias, doenças cardiovasculares, diabetes, DPOC \\
+\texttt{morte\_materna}             & Gravidez, parto e puerpério \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\textbf{Exclusão das causas externas.} O quinto grupo da lista oficial --- causas externas
+(acidentes, quedas, agressões, suicídios) --- foi \textbf{deliberadamente excluído}. As
+variáveis socioeconômicas disponíveis explicam mal essa mortalidade: acidentes de trânsito,
+homicídios e quedas respondem a fatores como segurança pública, infraestrutura viária e
+violência interpessoal, ausentes do nosso conjunto de \emph{features}. Incluí-las
+introduziria ruído estrutural sem ganho explicativo. O escopo final é, portanto, o das
+causas evitáveis \emph{sensíveis ao SUS e ao desenvolvimento socioeconômico}.
+
+\subsection{Pipeline de dados}
+
+O projeto é organizado em notebooks sequenciais (Tabela~\ref{tab:notebooks}), do ETL à
+mineração. Cada etapa é idempotente e persiste seus resultados em disco.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Notebooks do pipeline.}
+\label{tab:notebooks}
+\rowcolors{2}{cinzalin}{white}
+\begin{tabularx}{\textwidth}{l Y}
+\rowcolor{cinzahdr}
+\hdr{Notebook} & \hdr{Função} \\
+\midrule
+\texttt{01\_extracao}                 & Download e cache das cinco fontes (com \emph{fallbacks}). \\
+\texttt{02\_transformacao}            & Aplicação da LBCE, agregação e construção da \emph{feature matrix} (município $\times$ ano). \\
+\texttt{02b\_transformacao\_microdados} & Dataset individualizado (1 óbito por linha) com estatística descritiva. \\
+\texttt{03\_regressao}                & Regressão multivariada em painel (OLS, RF, XGBoost). \\
+\texttt{04\_clusterizacao}            & Clusterização \emph{K-Means} dos municípios. \\
+\texttt{05\_mineracao}                & Caracterização das causas CID-10 por cluster. \\
+\texttt{06\_taxa\_padronizada\_idade}  & Padronização etária da taxa e comparação com a bruta. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\textbf{Unidade de análise e \emph{join}.} O SIM identifica o município de residência por um
+código de 6 dígitos (\texttt{CODMUNRES}); o IBGE usa 7 dígitos (com dígito verificador). A
+junção entre fontes é feita pelos 6 primeiros dígitos. A \emph{feature matrix} final tem uma
+linha por município e ano (16.711 linhas; 5.570 municípios $\times$ 3 anos).
+
+\textbf{Variável-resposta.} A taxa bruta de mortalidade evitável por 100 mil habitantes é
+\[
+\text{taxa bruta} = \frac{\text{óbitos evitáveis (5--74 anos)}}{\text{população}} \times 100{.}000 .
+\]
+Como desfecho principal, porém, usamos a \textbf{taxa padronizada por idade} (subseção
+seguinte), que neutraliza diferenças de estrutura etária entre municípios.
+
+\subsection{Padronização por idade}
+
+A taxa bruta não corrige a estrutura etária: como as causas evitáveis (5--74 anos) são
+dominadas por doenças crônicas que matam perto dos 70, municípios mais envelhecidos têm taxa
+bruta maior \emph{só por isso}. Calculamos a taxa \textbf{padronizada por idade} (padronização
+direta): para cada município, a taxa específica de cada faixa quinquenal é ponderada pelos
+pesos da estrutura etária nacional (Censo 2022):
+\[
+\text{taxa padronizada}_m = \sum_{a} \frac{\text{óbitos}_{m,a}}{\text{população}_{m,a}}\; w_a \times 100{.}000,
+\qquad w_a = \frac{\text{pop. nacional da faixa } a}{\text{pop. nacional 5--74}} .
+\]
+O numerador por faixa vem dos microdados (idade de cada óbito); o denominador por faixa é
+extraído do Censo 2022 (IBGE, tabela 9514). É a taxa que cada município teria se tivesse a
+estrutura etária do Brasil --- tornando as comparações entre eles justas.
+
+\subsection{Modelagem (regressão em painel)}
+
+Tratamos os três anos como um \emph{painel agrupado} (\emph{pooled}), com o ano incluído como
+variável \emph{dummy} para capturar choques comuns de período. Optou-se por não usar efeitos
+fixos de município porque a maioria das \emph{features} (Atlas 2010) é invariante no tempo e
+seria absorvida por esses efeitos. Três modelos foram comparados:
+\begin{itemize}[nosep]
+  \item \textbf{OLS} (\emph{statsmodels}), com erros-padrão \emph{cluster-robust} por
+        município --- corrige a correlação entre as três observações de cada cidade.
+  \item \textbf{Random Forest} e \textbf{XGBoost}, para capturar não-linearidades e interações.
+\end{itemize}
+A divisão treino/teste usa \texttt{GroupShuffleSplit} por município (80/20), impedindo que o
+mesmo município apareça em treino e teste --- o que inflaria artificialmente o $R^2$.
+
+\subsection{Clusterização}
+
+Para a tipologia de municípios, agregamos as três observações de cada município em uma única
+linha (média das variáveis temporais; valor único das do Atlas). Aplicamos \emph{K-Means}
+sobre sete \emph{features} socioeconômicas padronizadas (IDH-M, Gini, log do PIB \emph{per
+capita}, log da despesa em saúde \emph{per capita}, analfabetismo, água encanada e esperança
+de vida). O número de clusters ($k=4$) foi escolhido pela combinação de método do cotovelo e
+\emph{silhouette}, priorizando a interpretabilidade. A taxa de mortalidade \textbf{não}
+entrou nas \emph{features} (evita circularidade): ela é usada apenas para caracterizar os
+clusters depois de formados.
+
+\subsection{Mineração das causas}
+
+Cada óbito individual foi associado ao cluster de seu município. As descrições oficiais dos
+códigos CID-10 vieram das tabelas auxiliares do DATASUS (\texttt{CID10.DBF}). Para identificar
+causas \emph{características} de cada cluster --- e não apenas as mais frequentes --- usamos o
+\emph{lift}:
+\[
+\text{lift}(causa, cluster) = \frac{P(causa \mid cluster)}{P(causa \mid \text{Brasil})},
+\]
+em que valores acima de 1 indicam sobre-representação no cluster.
+
+% ===================================================================
+\section{Resultados}
+
+\subsection{Panorama descritivo}
+
+Dos 4,54 milhões de óbitos registrados no triênio, 2,49 milhões estão na faixa de 5 a 74
+anos, dos quais \textbf{1,37 milhão} foram classificados como evitáveis pela LBCE. A
+distribuição entre grupos (Tabela~\ref{tab:grupos}) é fortemente dominada pelas doenças não
+transmissíveis.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Óbitos evitáveis por grupo LBCE (triênio 2022--2024).}
+\label{tab:grupos}
+\rowcolors{2}{cinzalin}{white}
+\begin{tabular}{l r r}
+\rowcolor{cinzahdr}
+\hdr{Grupo} & \hdr{Óbitos} & \hdr{\%} \\
+\midrule
+Doenças não transmissíveis & 1.109.236 & 81,2 \\
+Doenças infecciosas        &   250.735 & 18,4 \\
+Morte materna              &     4.827 &  0,4 \\
+Imunoprevenção             &     1.669 &  0,1 \\
+\midrule
+\textbf{Total}             & \textbf{1.366.467} & \textbf{100,0} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A taxa bruta média municipal foi de aproximadamente \textbf{226 óbitos evitáveis por 100 mil
+habitantes}, com grande dispersão (de $<$50 a $>$650 por 100 mil).
+
+\textbf{Efeito da padronização por idade.} A Tabela~\ref{tab:gradiente} contrasta a taxa
+bruta com a padronizada por região. Pela bruta, o gradiente é \emph{invertido} em relação à
+hipótese (Sul/Sudeste no topo). A padronização corrige o paradoxo: o \textbf{Nordeste passa a
+superar} Sudeste e Sul, e o Norte sobe de 159 para 228 --- coerente com a tese de que regiões
+menos desenvolvidas têm maior mortalidade evitável quando se neutraliza a estrutura etária.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Taxa bruta vs.\ padronizada por idade, por região (média dos municípios, /100k).}
+\label{tab:gradiente}
+\rowcolors{2}{cinzalin}{white}
+\begin{tabular}{l r r}
+\rowcolor{cinzahdr}
+\hdr{Região} & \hdr{Taxa bruta} & \hdr{Taxa padronizada} \\
+\midrule
+Norte        & 158,9 & 227,6 \\
+Nordeste     & 204,1 & \textbf{247,3} \\
+Centro-Oeste & 229,8 & 257,4 \\
+Sudeste      & 244,6 & 244,5 \\
+Sul          & 256,5 & 241,9 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Regressão}
+
+Os modelos foram estimados sobre a \textbf{taxa padronizada} (desfecho principal). O
+desempenho preditivo é baixo (Tabela~\ref{tab:metricas}, $R^2 \approx 0{,}09$--$0{,}10$):
+ao remover a variância de estrutura etária --- que estava correlacionada com
+região/desenvolvimento e ``inflava'' o $R^2$ da taxa bruta ($\approx 0{,}23$) --- resta apenas
+o sinal socioeconômico ``puro'', menor mas no sentido correto. O objetivo aqui é
+\emph{inferência}, não predição.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Desempenho dos modelos (alvo: taxa padronizada; \emph{hold-out} por município).}
+\label{tab:metricas}
+\rowcolors{2}{cinzalin}{white}
+\begin{tabular}{l r r r}
+\rowcolor{cinzahdr}
+\hdr{Modelo} & \hdr{$R^2$} & \hdr{RMSE} & \hdr{MAE} \\
+\midrule
+OLS (linear)   & 0,092 & 71,0 & 53,9 \\
+Random Forest  & 0,091 & 71,0 & 54,1 \\
+XGBoost        & 0,103 & 70,6 & 53,7 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+No painel completo (com controles de região e ano), o \textbf{Gini} permanece o achado central:
+$+151$ ($p<0{,}001$) --- mais desigualdade, mais mortalidade. A renda \emph{per capita}
+($-0{,}14$), a esperança de vida ($-4{,}2$) e a proporção de pobres ($-2{,}1$, colinear com
+renda) também são significativas. O efeito do IDH-M é absorvido pelas \emph{dummies} de região
+(N/NE são justamente as de menor IDH). Para isolá-lo, a Tabela~\ref{tab:coef} compara um modelo
+transversal \emph{sem} controles de região, com alvo bruto vs.\ padronizado --- evidenciando a
+correção do paradoxo.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Coeficiente do IDH-M em modelo transversal sem controles de região: a padronização
+inverte o sinal para o esperado. \mbox{*** $p<0{,}001$;\ * $p<0{,}05$.}}
+\label{tab:coef}
+\rowcolors{2}{cinzalin}{white}
+\begin{tabular}{l r r}
+\rowcolor{cinzahdr}
+\hdr{Variável} & \hdr{Alvo: taxa bruta} & \hdr{Alvo: taxa padronizada} \\
+\midrule
+IDH-M    & $-77{,}1$\,***  & $-126{,}5$\,*** \\
+Gini     & $+43{,}6$\,*    & $+85{,}8$\,***  \\
+Esp.\ de vida & $-0{,}1$   & $-3{,}5$\,***   \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Com a taxa padronizada, o IDH-M passa a ter efeito \textbf{negativo e fortemente significativo}
+(mais desenvolvimento $\rightarrow$ menos mortalidade) e o Gini reforça --- exatamente os sinais
+previstos pela hipótese.
+
+\subsection{Clusters de municípios}
+
+A clusterização produziu quatro perfis bem separados (ANOVA da taxa entre clusters altamente
+significativa), renumerados por \textbf{IDH-M crescente} (cluster 0 = mais vulnerável)
+--- Tabela~\ref{tab:clusters}. Reportamos as duas taxas: a coluna padronizada é a comparável.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Perfil dos quatro clusters de municípios (0 = menor IDH-M).}
+\label{tab:clusters}
+\rowcolors{2}{cinzalin}{white}
+\begin{tabular}{c r r r c c c l}
+\rowcolor{cinzahdr}
+\hdr{Cl.} & \hdr{Mun.} & \hdr{Taxa bruta} & \hdr{Taxa padr.} & \hdr{IDH-M} & \hdr{Gini} & \hdr{Água\%} & \hdr{Região dom.} \\
+\midrule
+0 &  784 & 183 & 232 & 0,56 & 0,54 & 58 & NE/N \\
+1 & 1.573 & 208 & 249 & 0,60 & 0,52 & 84 & NE \\
+2 & 1.430 & 248 & 240 & 0,70 & 0,45 & 92 & SE/S \\
+3 & 1.774 & 243 & 251 & 0,72 & 0,48 & 94 & SE/S \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Os clusters 0 e 1 reúnem municípios de menor IDH-M e pior saneamento, concentrados no
+Nordeste e Norte; os clusters 2 e 3, os mais desenvolvidos do Sudeste e Sul. Pela taxa
+\emph{bruta}, os desenvolvidos pareciam ter mortalidade maior (artefato etário); pela
+\emph{padronizada}, as taxas se aproximam (232--251) e o cluster vulnerável 1 fica em patamar
+comparável ao dos desenvolvidos --- a falsa vantagem das regiões pobres desaparece.
+
+\subsection{Mineração: do que morre cada perfil}
+
+A composição agregada de causas é \emph{semelhante} entre clusters --- todos dominados por
+infarto, diabetes e neoplasias. O sinal socioeconômico aparece nas causas
+\textbf{sobre-representadas} (Tabela~\ref{tab:lift}):
+
+\begin{table}[htbp]
+\centering\small
+\caption{Causas mais sobre-representadas (\emph{lift}) por cluster.}
+\label{tab:lift}
+\rowcolors{2}{cinzalin}{white}
+\begin{tabularx}{\textwidth}{l Y}
+\rowcolor{cinzahdr}
+\hdr{Cluster} & \hdr{Causas características (lift)} \\
+\midrule
+0 (vulnerável) & AVC (1,6$\times$), transtornos por álcool (1,6$\times$), diabetes, doença de Chagas, diarreia \\
+1 & esquistossomose (2,5$\times$), doença de Chagas (1,7$\times$), álcool, infecções intestinais \\
+2 (desenvolvido) & cardiopatia isquêmica crônica, infarto cerebral, neoplasia de cólon, hepatite crônica \\
+3 & dengue, enfisema, hipertensão, neoplasias de esôfago e laringe \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Há, portanto, uma \textbf{assinatura socioeconômica dupla}: perfis pobres ainda carregam
+doenças infecciosas e negligenciadas (Chagas, esquistossomose, diarreia) que o
+desenvolvimento deveria ter eliminado, enquanto perfis ricos concentram doenças crônicas. A
+morte materna também segue o gradiente esperado, caindo de 0,65\% dos óbitos no cluster 0
+para 0,31\% no cluster 3.
+
+% ===================================================================
+\section{Discussão e Limitações}
+
+\textbf{Padronização por idade (resolvida).} A taxa \emph{bruta} produzia um resultado
+paradoxal --- maior nos clusters desenvolvidos --- por confundimento etário: municípios
+desenvolvidos têm população mais envelhecida na faixa 5--74 anos e acumulam mais mortes por
+doenças crônicas. A padronização direta (com a estrutura etária do Censo 2022) corrige esse
+viés: o gradiente regional se realinha (Nordeste passa a superar Sudeste/Sul) e o coeficiente
+do IDH-M se torna negativo, como previsto. Permanecem duas ressalvas técnicas: (i) a
+padronização \emph{direta} é sensível a ruído em municípios pequenos com poucas mortes por
+faixa --- uma padronização \emph{indireta} (SMR) seria mais estável; (ii) o denominador por
+idade é do Censo 2022, aplicado aos três anos (a estrutura etária varia pouco no período).
+
+\textbf{Subnotificação em áreas remotas.} O cluster mais vulnerável (0, Norte/Nordeste rural)
+apresenta a menor taxa padronizada, o que provavelmente reflete subnotificação de óbitos e
+causas mal-definidas nessas áreas, e não menor mortalidade real --- uma limitação dos próprios
+registros do SIM.
+
+\textbf{Endogeneidade da despesa em saúde.} O coeficiente positivo da despesa \emph{per
+capita} (mais gasto associado a mais mortes) não deve ser lido como causal: municípios com
+maior carga de doença tendem a gastar mais (causalidade reversa). Isolar esse efeito exigiria
+instrumentos ou defasagens temporais.
+
+\textbf{Atlas DH defasado.} IDH-M, Gini e renda referem-se a 2010, enquanto os óbitos são de
+2022--2024. Essa defasagem de medição atenua as associações e contribui para o $R^2$ modesto.
+
+\textbf{Natureza ecológica.} Os clusters e as associações são de nível municipal. Não se pode
+inferir, a partir deles, o comportamento de indivíduos (falácia ecológica).
+
+% ===================================================================
+\section{Conclusão}
+
+O projeto entregou um pipeline reprodutível que integra cinco fontes públicas e sustenta três
+análises complementares. As evidências apontam, de forma consistente, que a mortalidade por
+causas evitáveis no Brasil tem natureza socioeconômica: a desigualdade (Gini) está
+associada positivamente à taxa de forma robusta, e o \emph{tipo} de causa evitável varia
+sistematicamente com o perfil do município --- doenças infecciosas e negligenciadas nos
+territórios pobres, doenças crônicas nos desenvolvidos. A padronização por idade, incorporada
+ao \emph{pipeline}, corrigiu o paradoxo das taxas brutas e alinhou os sinais da regressão à
+hipótese (IDH-M negativo, Gini positivo). O aprofundamento futuro mais relevante é a
+incorporação de variáveis da rede de atenção à saúde (leitos e médicos por habitante,
+cobertura da atenção básica) e o tratamento da subnotificação em áreas remotas.
+
+% ===================================================================
+\section*{Referências}
+\addcontentsline{toc}{section}{Referências}
+\begin{itemize}[nosep]
+  \item Malta DC et al. \emph{Lista de causas de mortes evitáveis por intervenções do SUS.}
+        Epidemiol.\ Serv.\ Saúde, 16(4):233--244, 2007.
+  \item Malta DC et al. \emph{Atualização da lista de causas de mortes evitáveis}
+        [Nota técnica]. Epidemiol.\ Serv.\ Saúde, 19(2):173--176, 2010.
+  \item DATASUS. \emph{Sistema de Informações sobre Mortalidade (SIM)} --- microdados CID-10.
+  \item IBGE. \emph{Sidra} --- População e PIB municipal.
+  \item Tesouro Nacional. \emph{SICONFI} --- Declaração de Contas Anuais (DCA).
+  \item IPEA. \emph{Atlas do Desenvolvimento Humano} (Censo 2010).
+\end{itemize}
+
+\end{document}
