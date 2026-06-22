@@ -119,3 +119,13 @@ seaborn
 - Malta DC et al. *Tabela Brasileira de Causas de Mortes Evitáveis.* Epidemiol. Serv. Saúde 16(4):233-244, 2007.
 - Malta DC et al. *Atualização da lista de causas de mortes evitáveis* [Nota técnica]. Epidemiol. Serv. Saúde 19(2):173-176, 2010.
 - DATASUS/SVS-MS. *Lista de Tabulação de Causas Evitáveis de 5 a 74 anos.* Disponível em: [drive.prefeitura.sp.gov.br](https://drive.prefeitura.sp.gov.br/cidade/secretarias/upload/saude/Anexo%202_MALTA_Atualizacao_da_lista_de_causas_de_mortes_2010.pdf)
+
+## Alunos
+Segue o grupo responsável pelo desenvolvimento do projeto.
+
+| Nome | 
+|------|
+| Amanda Ferreira Dahm | 
+| João Marcos Santos e Carvalho |
+| Maria Clara Fontenele Silva |
+| Vitor Mendonça Mendes|
