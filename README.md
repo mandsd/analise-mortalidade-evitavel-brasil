@@ -114,6 +114,16 @@ matplotlib
 seaborn
 ```
 
+## Alunos
+Segue o grupo responsável pelo desenvolvimento do projeto.
+
+| Nome |
+|------|
+| Amanda Ferreira Dahm | 
+| João Marcos Santos e Carvalho |
+| Maria Clara Fontenele Silva |
+| Vitor Mendonça Mendes |
+
 ## Referências
 
 - Malta DC et al. *Tabela Brasileira de Causas de Mortes Evitáveis.* Epidemiol. Serv. Saúde 16(4):233-244, 2007.
